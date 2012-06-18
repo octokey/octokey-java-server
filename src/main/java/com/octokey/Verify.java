@@ -26,6 +26,9 @@ public class Verify {
      * user's set of authorized public keys.
      *
      * @param auth_request_base64 The base64 auth request string sent by the client.
+     * @param username The username of the user requesting access. Checked against
+     *    the signed username in the auth request to make sure we're signing in the
+     *    right user.
      * @param user_public_keys The authorized public keys for the user requesting
      *    access, in the same format as ~/.ssh/authorized_keys (plain text; keys
      *    separated by newlines; each line consisting of key type, base64 key and
@@ -35,7 +38,7 @@ public class Verify {
      *    verification fails (so that an attacker can't use an auth request from
      *    one site to log into another site).
      */
-    public Verify(String auth_request_base64, String user_public_keys, String[] hostnames) {
+    public Verify(String auth_request_base64, String username, String user_public_keys, String[] hostnames) {
         this.auth_request = new AuthRequest(auth_request_base64);
         this.public_keys = parsePublicKeys(user_public_keys);
         this.hostnames = new HashSet<String>();
@@ -44,6 +47,9 @@ public class Verify {
         if (auth_request.signer == null) {
             this.valid = false;
             this.error = auth_request.error;
+        } else if (!auth_request.username.equals(username)) { // check is not timing sensitive
+            this.valid = false;
+            this.error = "requested username does not match signed username";
         } else if (!public_keys.contains(auth_request.signer)) {
             this.valid = false;
             this.error = "signature is not for one of the user's public keys";
