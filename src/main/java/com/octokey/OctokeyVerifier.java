@@ -15,7 +15,7 @@ import org.bouncycastle.crypto.signers.RSADigestSigner;
 import org.bouncycastle.util.encoders.Base64;
 
 
-public class Verify {
+public class OctokeyVerifier {
     private final AuthRequest auth_request;
     private final Set<PublicKey> public_keys;
     private final Set<String> hostnames;
@@ -38,7 +38,7 @@ public class Verify {
      *    verification fails (so that an attacker can't use an auth request from
      *    one site to log into another site).
      */
-    public Verify(String auth_request_base64, String username, String user_public_keys, String[] hostnames) {
+    public OctokeyVerifier(String auth_request_base64, String username, String user_public_keys, String[] hostnames) {
         this.auth_request = new AuthRequest(auth_request_base64);
         this.public_keys = parsePublicKeys(user_public_keys);
         this.hostnames = new HashSet<String>();
