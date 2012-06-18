@@ -19,8 +19,8 @@ import org.bouncycastle.util.encoders.Base64;
 
 /**
  * A challenge that the server can verify as a challenge it has issued, without
- * requiring any persistent state on the server. The challenge is constructed as
- * follows:
+ * requiring any persistent state on the server. The challenge is a Base64 string,
+ * whose binary contents is as follows:
  *
  *   - 1 byte   -- version number (currently == 1)
  *   - 8 bytes  -- timestamp (milliseconds since epoch, big endian)
@@ -119,12 +119,12 @@ public class HMACChallenge implements ChallengeVerifier {
         byte[] output = new byte[buffer.position() + digest.getDigestSize()];
         buffer.rewind();
         buffer.get(output);
-        return output;
+        return Base64.encode(output);
     }
 
     @Override
     public boolean verify(byte[] challenge) {
-        ByteBuffer buffer = ByteBuffer.wrap(challenge);
+        ByteBuffer buffer = ByteBuffer.wrap(Base64.decode(challenge));
         try {
             byte version = buffer.get();
             if (version != CHALLENGE_VERSION) return false;
