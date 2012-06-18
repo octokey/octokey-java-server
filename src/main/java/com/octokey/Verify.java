@@ -165,6 +165,10 @@ public class Verify {
             }
         }
 
+        public String getDescription() {
+            return description;
+        }
+
         public int hashCode() {
             return key.getExponent().hashCode() + key.getModulus().hashCode();
         }
