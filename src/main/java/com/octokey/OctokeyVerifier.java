@@ -22,6 +22,8 @@ public class OctokeyVerifier {
     private final boolean valid;
     private final String error;
 
+    private static final int MAX_BUFFER_SIZE = 1024 * 1024;
+
     /** Checks whether an auth request has a valid signature by one of a given
      * user's set of authorized public keys.
      *
@@ -90,8 +92,11 @@ public class OctokeyVerifier {
 
     /** Reads a RFC4251 "string" type from a given buffer, and returns it as an array
      * of bytes. */
-    private static byte[] readBytes(ByteBuffer buffer) {
+    private static byte[] readBytes(ByteBuffer buffer, String context) throws ParsingException {
         int length = buffer.getInt(); // network byte order (big endian) is default for ByteBuffer
+        if (length < 0 || length > MAX_BUFFER_SIZE) {
+            throw new ParsingException(context, "illegal buffer size: " + length);
+        }
         byte[] result = new byte[length];
         buffer.get(result);
         return result;
@@ -99,17 +104,17 @@ public class OctokeyVerifier {
 
     /** Reads a RFC4251 "string" type from a given buffer, interprets it as UTF-8 and
      * returns it as a Java string. */
-    private static String readString(ByteBuffer buffer) {
+    private static String readString(ByteBuffer buffer, String context) throws ParsingException {
         try {
-            return new String(readBytes(buffer), "UTF-8");
+            return new String(readBytes(buffer, context), "UTF-8");
         } catch (UnsupportedEncodingException e) {
             throw new RuntimeException(e); // should not happen
         }
     }
 
     /** Reads a RFC4251 "mpint" type from a given buffer. */
-    private static BigInteger readBigInt(ByteBuffer buffer) {
-        byte[] bytes = readBytes(buffer);
+    private static BigInteger readBigInt(ByteBuffer buffer, String context) throws ParsingException {
+        byte[] bytes = readBytes(buffer, context);
         if (bytes.length == 0) return BigInteger.ZERO;
 
         // The sign bit of the first byte is interpreted as sign bit for the entire mpint,
@@ -149,14 +154,14 @@ public class OctokeyVerifier {
             ByteBuffer key_buf = ByteBuffer.wrap(key_bytes);
 
             try {
-                String encoded_key_type = readString(key_buf);
+                String encoded_key_type = readString(key_buf, "pubkey type");
                 if (!encoded_key_type.equals(this.key_type)) {
                     throw new KeyException("public key %s has key type mismatch: %s != %s",
                                            description, key_type, encoded_key_type);
                 }
 
-                BigInteger exponent = readBigInt(key_buf);
-                BigInteger modulus = readBigInt(key_buf);
+                BigInteger exponent = readBigInt(key_buf, "pubkey exponent");
+                BigInteger modulus = readBigInt(key_buf, "pubkey modulus");
 
                 if (key_buf.hasRemaining()) {
                     throw new KeyException("public key %s is too long -- corrupted?", description);
@@ -166,6 +171,8 @@ public class OctokeyVerifier {
             } catch (BufferUnderflowException e) {
                 // Most likely the base64 string was somehow truncated
                 throw new KeyException("public key %s is too short -- corrupted?", description);
+            } catch (ParsingException e) {
+                throw new KeyException("public key %s corrupted: %s", description, e.getMessage());
             }
         }
 
@@ -203,9 +210,9 @@ public class OctokeyVerifier {
         private AuthRequest(String auth_request_base64) {
             ByteBuffer buffer = ByteBuffer.wrap(Base64.decode(auth_request_base64));
             try {
-                this.challenge = readBytes(buffer);
+                this.challenge = readBytes(buffer, "challenge");
 
-                String request_url_str = readString(buffer);
+                String request_url_str = readString(buffer, "request_url");
                 try {
                     this.request_url = new URL(request_url_str);
                 } catch (MalformedURLException e) {
@@ -213,30 +220,30 @@ public class OctokeyVerifier {
                     return;
                 }
 
-                this.username = readString(buffer);
+                this.username = readString(buffer, "username");
 
-                String service_name = readString(buffer);
+                String service_name = readString(buffer, "service_name");
                 if (!service_name.equals(OCTOKEY_SERVICE_NAME)) {
                     this.error = "unsupported service name: " + service_name;
                     return;
                 }
 
-                String auth_method = readString(buffer);
+                String auth_method = readString(buffer, "auth_method");
                 if (!auth_method.equals(AUTHENTICATION_METHOD)) {
                     this.error = "unsupported authentication method: " + auth_method;
                     return;
                 }
 
-                String signing_algorithm = readString(buffer);
+                String signing_algorithm = readString(buffer, "signing_algorithm");
                 if (!signing_algorithm.equals(SIGNING_ALGORITHM)) {
                     this.error = "unsupported signing algorithm: " + signing_algorithm;
                     return;
                 }
 
-                PublicKey pubkey = new PublicKey(signing_algorithm, readBytes(buffer));
+                PublicKey pubkey = new PublicKey(signing_algorithm, readBytes(buffer, "pubkey"));
 
                 int signature_offset = buffer.position();
-                Signature signature = new Signature(readBytes(buffer));
+                Signature signature = new Signature(readBytes(buffer, "signature"));
                 if (buffer.hasRemaining()) {
                     this.error = "auth request is too long -- did something get appended?";
                     return;
@@ -252,6 +259,8 @@ public class OctokeyVerifier {
                 this.error = "auth request is too short -- did it get truncated?";
             } catch (KeyException e) {
                 this.error = e.getMessage();
+            } catch (ParsingException e) {
+                this.error = e.getMessage();
             }
         }
     }
@@ -262,15 +271,15 @@ public class OctokeyVerifier {
         private byte[] sig_blob;
         public static final String SIGNING_ALGORITHM = "ssh-rsa";
 
-        private Signature(byte[] sig_structure) {
+        private Signature(byte[] sig_structure) throws ParsingException {
             ByteBuffer buffer = ByteBuffer.wrap(sig_structure);
 
-            String algorithm = readString(buffer);
+            String algorithm = readString(buffer, "signature_algorithm");
             if (!algorithm.equals(SIGNING_ALGORITHM)) {
                 throw new KeyException("unsupported signing algorithm: %s", algorithm);
             }
 
-            this.sig_blob = readBytes(buffer);
+            this.sig_blob = readBytes(buffer, "signature_blob");
             if (buffer.hasRemaining()) {
                 throw new KeyException("signature structure is too long -- corrupted?");
             }
@@ -284,6 +293,12 @@ public class OctokeyVerifier {
         }
     }
 
+
+    public static class ParsingException extends Exception {
+        public ParsingException(String context, String message) {
+            super(String.format("while parsing %s: %s", context, message));
+        }
+    }
 
     public static class KeyException extends RuntimeException {
         public KeyException(String format, Object... args) {
