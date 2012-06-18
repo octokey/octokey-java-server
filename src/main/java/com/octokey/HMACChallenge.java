@@ -22,6 +22,7 @@ import org.bouncycastle.util.encoders.Base64;
  * requiring any persistent state on the server. The challenge is constructed as
  * follows:
  *
+ *   - 1 byte   -- version number (currently == 1)
  *   - 8 bytes  -- timestamp (milliseconds since epoch, big endian)
  *   - 1 byte   -- client IP address family (4 = IPv4, 6 = IPv6)
  *   - 4 bytes or 16 bytes -- client IP address in network byte order
@@ -40,6 +41,8 @@ public class HMACChallenge implements ChallengeVerifier {
     /** Number of random bytes to insert into the challenge, to make it unique and
      * to give the HMAC something meaty to sign */
     public static final int RANDOM_BYTES = 32;
+
+    public static final byte CHALLENGE_VERSION = 1;
 
     private final KeyParameter secret;
     private final InetAddress client_ip;
@@ -100,6 +103,7 @@ public class HMACChallenge implements ChallengeVerifier {
 
     public byte[] generate() {
         ByteBuffer buffer = ByteBuffer.allocate(100);
+        buffer.put(CHALLENGE_VERSION);
         buffer.putLong(new Date().getTime());
         serializeClientIP(buffer);
 
@@ -122,6 +126,8 @@ public class HMACChallenge implements ChallengeVerifier {
     public boolean verify(byte[] challenge) {
         ByteBuffer buffer = ByteBuffer.wrap(challenge);
         try {
+            byte version = buffer.get();
+            if (version != CHALLENGE_VERSION) return false;
             if (!checkTimestamp(buffer)) return false;
             if (!checkClientIP(buffer)) return false;
             buffer.position(buffer.position() + RANDOM_BYTES);
