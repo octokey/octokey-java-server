@@ -56,8 +56,11 @@ public class Verify {
         HashSet<PublicKey> result = new HashSet<PublicKey>();
         for (String line : public_keys.split("[\r\n]")) {
             String[] fields = line.replaceFirst("#.*", "").trim().split("[\t ]+", 3);
-            if (fields.length >= 2) {
-                result.add(new PublicKey(fields[0], fields[1], fields.length == 3 ? fields[2] : ""));
+            if (fields.length >= 1) {
+                String key_type = fields[0];
+                String key_base64 = (fields.length > 1) ? fields[1] : "";
+                String description = (fields.length > 2) ? fields[2] : "";
+                result.add(new PublicKey(key_type, key_base64, description));
             }
         }
         return result;
@@ -116,18 +119,18 @@ public class Verify {
         }
 
         private PublicKey(String key_type, byte[] key_bytes, String description) {
+            if (!key_type.equals("ssh-rsa")) {
+                throw new KeyException("unsupported public key type: %s", key_type);
+            }
             this.key_type = key_type;
             this.description = description;
             ByteBuffer key_buf = ByteBuffer.wrap(key_bytes);
 
             try {
                 String encoded_key_type = readString(key_buf);
-                if (!encoded_key_type.equals(key_type)) {
+                if (!encoded_key_type.equals(this.key_type)) {
                     throw new KeyException("public key %s has key type mismatch: %s != %s",
                                            description, key_type, encoded_key_type);
-                }
-                if (!encoded_key_type.equals("ssh-rsa")) {
-                    throw new KeyException("public key %s has unsupported type %s", description, encoded_key_type);
                 }
 
                 BigInteger exponent = readBigInt(key_buf);
