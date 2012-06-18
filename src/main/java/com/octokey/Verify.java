@@ -2,6 +2,8 @@ package com.octokey;
 
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.BufferUnderflowException;
 import java.util.HashSet;
@@ -16,6 +18,7 @@ import org.bouncycastle.util.encoders.Base64;
 public class Verify {
     private final AuthRequest auth_request;
     private final Set<PublicKey> public_keys;
+    private final Set<String> hostnames;
     private final boolean valid;
     private final String error;
 
@@ -27,10 +30,16 @@ public class Verify {
      *    access, in the same format as ~/.ssh/authorized_keys (plain text; keys
      *    separated by newlines; each line consisting of key type, base64 key and
      *    description text).
+     * @param hostnames List of HTTP hostnames on which the login form may be
+     *    submitted. If the signature is not for a URL on one of those hosts,
+     *    verification fails (so that an attacker can't use an auth request from
+     *    one site to log into another site).
      */
-    public Verify(String auth_request_base64, String user_public_keys) {
+    public Verify(String auth_request_base64, String user_public_keys, String[] hostnames) {
         this.auth_request = new AuthRequest(auth_request_base64);
         this.public_keys = parsePublicKeys(user_public_keys);
+        this.hostnames = new HashSet<String>();
+        for (String hostname : hostnames) this.hostnames.add(hostname);
 
         if (auth_request.signer == null) {
             this.valid = false;
@@ -38,6 +47,9 @@ public class Verify {
         } else if (!public_keys.contains(auth_request.signer)) {
             this.valid = false;
             this.error = "signature is not for one of the user's public keys";
+        } else if (!this.hostnames.contains(auth_request.request_url.getHost())) {
+            this.valid = false;
+            this.error = "auth request is for a non-whitelisted URL: " + auth_request.request_url;
         } else {
             this.valid = true;
             this.error = null;
@@ -164,12 +176,12 @@ public class Verify {
 
     /** Encapsulates a publickey authentication request as specified in RFC 4252. */
     public static class AuthRequest {
+        private URL request_url;
         private PublicKey signer; // set only if the signature has been verified
         private byte[] challenge; // equivalent to session identifier in SSH
         private String username;  // username for which authentication is requested by the client
         private String error;     // error message if authentication failed, null if no error
 
-        public static final byte SSH_MSG_USERAUTH_REQUEST = 50; // RFC 4252
         public static final String OCTOKEY_SERVICE_NAME = "octokey-auth";
         public static final String AUTHENTICATION_METHOD = "publickey";
         public static final String SIGNING_ALGORITHM = "ssh-rsa";
@@ -179,9 +191,11 @@ public class Verify {
             try {
                 this.challenge = readBytes(buffer);
 
-                byte request_type = buffer.get();
-                if (request_type != SSH_MSG_USERAUTH_REQUEST) {
-                    this.error = "unsupported request type: " + request_type;
+                String request_url_str = readString(buffer);
+                try {
+                    this.request_url = new URL(request_url_str);
+                } catch (MalformedURLException e) {
+                    this.error = "malformed request URL: " + request_url_str;
                     return;
                 }
 
@@ -196,12 +210,6 @@ public class Verify {
                 String auth_method = readString(buffer);
                 if (!auth_method.equals(AUTHENTICATION_METHOD)) {
                     this.error = "unsupported authentication method: " + auth_method;
-                    return;
-                }
-
-                byte signature_included = buffer.get();
-                if (signature_included != 1) {
-                    this.error = "auth requests without signature are not allowed";
                     return;
                 }
 
