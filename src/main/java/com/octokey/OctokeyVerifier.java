@@ -38,7 +38,8 @@ public class OctokeyVerifier {
      *    verification fails (so that an attacker can't use an auth request from
      *    one site to log into another site).
      */
-    public OctokeyVerifier(String auth_request_base64, String username, String user_public_keys, String[] hostnames) {
+    public OctokeyVerifier(String auth_request_base64, String username, String user_public_keys,
+                           String[] hostnames, ChallengeVerifier challenge_verifier) {
         this.auth_request = new AuthRequest(auth_request_base64);
         this.public_keys = parsePublicKeys(user_public_keys);
         this.hostnames = new HashSet<String>();
@@ -56,6 +57,9 @@ public class OctokeyVerifier {
         } else if (!this.hostnames.contains(auth_request.request_url.getHost())) {
             this.valid = false;
             this.error = "auth request is for a non-whitelisted URL: " + auth_request.request_url;
+        } else if (!challenge_verifier.verify(auth_request.challenge)) {
+            this.valid = false;
+            this.error = "auth request's challenge is not acceptable";
         } else {
             this.valid = true;
             this.error = null;
